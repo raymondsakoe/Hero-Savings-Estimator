@@ -135,7 +135,7 @@ const App: React.FC = () => {
           </main>
           <footer className="text-center mt-6 text-gray-200">
             <div className="w-48 mx-auto border-t border-gray-500 my-4"></div>
-            <p className="font-semibold text-xs">Keys for Everyday Heroes | Downtown Financial Group | NMLS #1830011 & #2072896</p>
+            <p className="font-semibold text-xs">Keys for Community Heroes | Downtown Financial Group | NMLS #1830011 & #2072896</p>
             <p className="text-xs mt-1">Powered by Go Rascal</p>
             <p className="mt-2 px-4 text-xs">
               Not a commitment to lend. Subject to credit approval and state restrictions.

@@ -83,7 +83,7 @@ const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({ generatedConten
   const handleShare = async () => {
     if (!savingsData) return;
 
-    const shareText = `I just found out I could save between ${formatCurrency(savingsData.minSavings)} and ${formatCurrency(savingsData.maxSavings)} on a new home with Keys for Everyday Heroes! Find out your savings.`;
+    const shareText = `I just found out I could save between ${formatCurrency(savingsData.minSavings)} and ${formatCurrency(savingsData.maxSavings)} on a new home with Keys for Community Heroes! Find out your savings.`;
     const shareUrl = window.location.href; 
 
     const shareData = {
@@ -116,7 +116,7 @@ const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({ generatedConten
         ✅ Your Full Hero Savings Report is on the way!
       </h2>
       <p className="text-gray-600 mb-6">
-        We’ve sent your personalized savings breakdown to your email and phone. Our Keys for Everyday Heroes team will connect with you within 24 hours to confirm your options.
+        We’ve sent your personalized savings breakdown to your email and phone. Our Keys for Community Heroes team will connect with you within 24 hours to confirm your options.
       </p>
       <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
         <a

@@ -5,7 +5,7 @@ const Logo = ({ className }: { className?: string }) => (
     xmlns="http://www.w3.org/2000/svg"
     viewBox="0 0 300 80"
     className={className}
-    aria-label="Keys for Everyday Heroes"
+    aria-label="Keys for Community Heroes"
   >
     <defs>
       <style>
@@ -14,7 +14,7 @@ const Logo = ({ className }: { className?: string }) => (
     </defs>
     
     <text x="150" y="35" className="logo-text" fontSize="28">Keys for</text>
-    <text x="150" y="68" className="logo-text" fontSize="28">Everyday Heroes</text>
+    <text x="150" y="68" className="logo-text" fontSize="28">Community Heroes</text>
   </svg>
 );
 
