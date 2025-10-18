@@ -114,7 +114,7 @@ export const sendLeadData = async (
       'By submitting, you agree that Downtown Financial Group may contact you by call, text, and email at the number and address provided, including with automated technology and prerecorded messages, about your inquiry and related services. Consent is not required to obtain services. Message and data rates may apply. You also agree to our Privacy Policy and Terms.',
     tcpa_consent_time: new Date().toISOString(),
     source: 'Hero App',
-    campaign: 'KFEH-Estimator',
+    campaign: 'KFCH-Estimator',
     medium: 'Paid/Organic',
   };
 
