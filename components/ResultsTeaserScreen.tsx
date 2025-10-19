@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { FormData, SavingsData, GeneratedContent } from '../types';
 import { generateNotifications } from '../services/notificationService';
 import { sendLeadData } from '../services/webhookService';
@@ -19,10 +19,14 @@ const loadingMessages = [
   'Finalizing your report...',
 ];
 
+const BOT_MIN_ELAPSED_MS = 3000;
+
 const ResultsTeaserScreen: React.FC<ResultsTeaserScreenProps> = ({ onNext, onBack, setGeneratedContent, savingsData, formData, updateFormData }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [loadingMessage, setLoadingMessage] = useState(loadingMessages[0]);
+  const [honeypot, setHoneypot] = useState('');
+  const formStartRef = useRef(Date.now());
 
   useEffect(() => {
     let messageInterval: ReturnType<typeof setInterval> | undefined;
@@ -42,6 +46,20 @@ const ResultsTeaserScreen: React.FC<ResultsTeaserScreenProps> = ({ onNext, onBac
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const elapsed = Date.now() - formStartRef.current;
+    if (honeypot.trim().length > 0) {
+      console.warn('Honeypot field was filled; likely bot submission blocked.');
+      setError('Submission failed. Please try again.');
+      return;
+    }
+
+    if (elapsed < BOT_MIN_ELAPSED_MS) {
+      console.warn(`Form submitted too quickly (${elapsed}ms); blocking as potential bot.`);
+      setError('Submission failed. Please try again.');
+      return;
+    }
+
     setIsLoading(true);
     setError('');
 
@@ -113,6 +131,19 @@ const ResultsTeaserScreen: React.FC<ResultsTeaserScreenProps> = ({ onNext, onBac
             onChange={e => updateFormData('phone', e.target.value)}
             required
             className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+          <div className="hidden" aria-hidden="true">
+            <label>
+              Company
+              <input
+                type="text"
+                name="company"
+                value={honeypot}
+                onChange={(event) => setHoneypot(event.target.value)}
+                tabIndex={-1}
+                autoComplete="off"
+              />
+            </label>
+          </div>
           
           <div className="text-left">
             <label className="flex items-center space-x-2 text-gray-600 cursor-pointer">
