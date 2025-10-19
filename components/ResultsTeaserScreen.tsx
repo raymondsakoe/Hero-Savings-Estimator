@@ -44,21 +44,26 @@ const ResultsTeaserScreen: React.FC<ResultsTeaserScreenProps> = ({ onNext, onBac
     e.preventDefault();
     setIsLoading(true);
     setError('');
-    
-    // Fire and forget webhook
-    sendLeadData(formData, savingsData).catch(err => {
-      console.error("Webhook failed to send:", err);
-    });
 
-    const content = await generateNotifications(formData, savingsData);
-    if (content) {
+    try {
+      const content = await generateNotifications(formData, savingsData);
+      if (!content) {
+        setError('Could not generate your report. Please try again later.');
+        return;
+      }
+
       setGeneratedContent(content);
+
+      try {
+        await sendLeadData(formData, savingsData, content);
+      } catch (err) {
+        console.error("Lead sync failed:", err);
+      }
+
       onNext();
-    } else {
-      setError('Could not generate your report. Please try again later.');
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(false);
   };
   
   const isFormValid = formData.name && formData.email && formData.phone && formData.tcpaConsent;
