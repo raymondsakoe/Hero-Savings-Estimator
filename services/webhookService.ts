@@ -29,7 +29,7 @@ const sendToGoHighLevel = async (formData: FormData): Promise<GoHighLevelContact
     email: formData.email,
     phone: formData.phone,
     source: 'Hero Savings Estimator',
-    tags: ['KFEH-Estimator'],
+    tags: ['KFCH-Estimator'],
   };
 
   try {
