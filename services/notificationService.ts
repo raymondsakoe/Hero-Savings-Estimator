@@ -135,7 +135,11 @@ export const generateNotifications = async (
       },
     });
 
-    const jsonString = response.text.trim();
+    const jsonString = response.text?.trim();
+    if (!jsonString) {
+      console.error("Model response missing text payload. Using fallback content instead.");
+      return getFallbackContent(formData, savingsData);
+    }
     const parsedJson = JSON.parse(jsonString);
 
     return parsedJson as GeneratedContent;

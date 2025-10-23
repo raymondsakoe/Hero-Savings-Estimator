@@ -11,7 +11,7 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onNext }) => {
         Unlock Thousands in Homebuyer Savings
       </h1>
       <p className="text-lg text-gray-600 mb-8 max-w-xl mx-auto">
-        Exclusive rewards for First Responders, Blue-Collar Workers, and Everyday Heroes.
+        Exclusive rewards for First Responders, Blue-Collar Workers, and Community Heroes.
       </p>
       <button
         onClick={onNext}
