@@ -145,7 +145,7 @@ const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({ generatedConten
             <h3 className="text-lg font-semibold text-gray-800 mb-3">Email Preview:</h3>
             <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
                 <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-sm text-gray-500 mb-3 border-b pb-3">
-                    <span className="font-semibold">From:</span><span>Downtown Financial Group</span>
+                    <span className="font-semibold">From:</span><span>Keys for Community Heroes</span>
                     <span className="font-semibold">To:</span><span>{formData.email}</span>
                     <span className="font-semibold">Subject:</span><span className="font-bold text-gray-800">{generatedContent.email.subject}</span>
                 </div>
