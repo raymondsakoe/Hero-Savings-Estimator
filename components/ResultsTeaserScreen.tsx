@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { FormData, SavingsData, GeneratedContent } from '../types';
 import { generateNotifications } from '../services/notificationService';
 import { sendLeadData } from '../services/webhookService';
+import { sanitizeFormData } from '../utils/sanitize';
 
 interface ResultsTeaserScreenProps {
   onNext: () => void;
@@ -64,7 +65,23 @@ const ResultsTeaserScreen: React.FC<ResultsTeaserScreenProps> = ({ onNext, onBac
     setError('');
 
     try {
-      const content = await generateNotifications(formData, savingsData);
+      const sanitizedFormData = sanitizeFormData(formData);
+      const sanitizedPhoneDigits = sanitizedFormData.phone.replace(/\D+/g, '');
+      if (sanitizedFormData.name !== formData.name) {
+        updateFormData('name', sanitizedFormData.name);
+      }
+      if (sanitizedFormData.email !== formData.email) {
+        updateFormData('email', sanitizedFormData.email);
+      }
+      if (sanitizedFormData.phone !== formData.phone) {
+        updateFormData('phone', sanitizedFormData.phone);
+      }
+      if (sanitizedPhoneDigits.length < 10 || !sanitizedFormData.email) {
+        setError('Please confirm your contact information and try again.');
+        return;
+      }
+
+      const content = await generateNotifications(sanitizedFormData, savingsData);
       if (!content) {
         setError('Could not generate your report. Please try again later.');
         return;
@@ -73,7 +90,7 @@ const ResultsTeaserScreen: React.FC<ResultsTeaserScreenProps> = ({ onNext, onBac
       setGeneratedContent(content);
 
       try {
-        await sendLeadData(formData, savingsData, content);
+        await sendLeadData(sanitizedFormData, savingsData, content);
       } catch (err) {
         console.error("Lead sync failed:", err);
       }
