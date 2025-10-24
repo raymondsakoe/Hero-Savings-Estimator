@@ -11,20 +11,32 @@ const formatCurrency = (amount: number) => {
   }).format(amount);
 };
 
+const getFirstName = (fullName: string) => {
+  const trimmed = fullName.trim();
+  if (!trimmed) {
+    return "Hero";
+  }
+  const [first] = trimmed.split(/\s+/);
+  return first || "Hero";
+};
+
 const calendlyLink = 'https://calendly.com/malcolm-downtownfinancialgroup/quickintakecall';
 const longDisclaimer = `For information purposes only. This is not a commitment to lend or extend credit. Information and/or dates are subject to change without notice. All loans are subject to credit approval. Program availability, terms, and savings vary by state and are subject to change without notice. Estimated savings include a lender closing credit determined by loan amount tier and may include partner discounts; partner discounts are provided by third parties and are not guaranteed. Insurance premium comparisons reflect quoted differences versus alternative carriers and will vary by property, coverage, and carrier underwriting. Moving and inspection discounts are subject to vendor participation and availability. This tool provides estimates only and does not constitute financial, legal, or tax advice.`;
 const smsDisclaimer = `Reply STOP to opt out. Not a commitment to lend. Subject to credit approval. Terms & savings vary by state & are not guaranteed. NMLS #1830011 & #2072896.`;
 
 const getFallbackContent = (formData: FormData, savingsData: SavingsData): GeneratedContent => {
-    const firstName = formData.name.split(' ')[0] || "Hero";
+    const firstName = getFirstName(formData.name);
     const downPaymentAmount = (formData.homePrice * formData.downPaymentPercent) / 100;
+    const formattedGuaranteedSavings = formatCurrency(GUARANTEED_SAVINGS);
+    const formattedMinBonusSavings = formatCurrency(MIN_BONUS_SAVINGS);
+    const formattedMaxBonusSavings = formatCurrency(MAX_BONUS_SAVINGS);
     return {
       email: {
         subject: "Your Hero Savings Report",
-        body: `Hi ${firstName},\n\nHere’s your personalized Hero Savings Report.\n\nHome Price: ${formatCurrency(formData.homePrice)}\nDown Payment: ${formData.downPaymentPercent}% (${formatCurrency(downPaymentAmount)})\nEstimated Loan Amount: ${formatCurrency(savingsData.loanAmount)}\n\nYour Savings\n• Hero Credit (loan-based tier): ${formatCurrency(savingsData.heroCredit)}\n• Guaranteed Partner Savings: $${GUARANTEED_SAVINGS}\n• Potential Bonus Savings: $${MIN_BONUS_SAVINGS}–$${MAX_BONUS_SAVINGS}\n\nTotal Estimated Savings: ${formatCurrency(savingsData.minSavings)}–${formatCurrency(savingsData.maxSavings)}\n\nBook your free call to confirm numbers and next steps:\n${calendlyLink}\n\n—\nDowntown Financial Group | NMLS #1830011 & #2072896\nPowered by Go Rascal\n\n${longDisclaimer}`
+        body: `Hi ${firstName},\n\nHere’s your personalized Hero Savings Report.\n\nHome Price: ${formatCurrency(formData.homePrice)}\nDown Payment: ${formData.downPaymentPercent}% (${formatCurrency(downPaymentAmount)})\nEstimated Loan Amount: ${formatCurrency(savingsData.loanAmount)}\n\nYour Savings\n• Hero Credit (loan-based tier): ${formatCurrency(savingsData.heroCredit)}\n• Guaranteed Partner Savings: ${formattedGuaranteedSavings}\n• Potential Bonus Savings: ${formattedMinBonusSavings}–${formattedMaxBonusSavings}\n\nTotal Estimated Savings: ${formatCurrency(savingsData.minSavings)}–${formatCurrency(savingsData.maxSavings)}\n\nBook your free call to confirm numbers and next steps:\n${calendlyLink}\n\n—\nDowntown Financial Group | NMLS #1830011 & #2072896\nPowered by Go Rascal\n\n${longDisclaimer}`
       },
       sms: {
-        body: `Hi ${firstName}, your Hero Savings Report is ready.\n\nHome Price: ${formatCurrency(formData.homePrice)} | Down: ${formData.downPaymentPercent}% (${formatCurrency(downPaymentAmount)}) | Loan: ${formatCurrency(savingsData.loanAmount)}\nHero Credit: ${formatCurrency(savingsData.heroCredit)} | Partner: $${GUARANTEED_SAVINGS} | Bonus: $${MIN_BONUS_SAVINGS}–$${MAX_BONUS_SAVINGS}\nTotal Est. Savings: ${formatCurrency(savingsData.minSavings)}–${formatCurrency(savingsData.maxSavings)}\n\nBook your free call: ${calendlyLink}\n\n${smsDisclaimer}`
+        body: `Hi ${firstName}, your Hero Savings Report is ready.\n\nHome Price: ${formatCurrency(formData.homePrice)} | Down: ${formData.downPaymentPercent}% (${formatCurrency(downPaymentAmount)}) | Loan: ${formatCurrency(savingsData.loanAmount)}\nHero Credit: ${formatCurrency(savingsData.heroCredit)} | Partner: ${formattedGuaranteedSavings} | Bonus: ${formattedMinBonusSavings}–${formattedMaxBonusSavings}\nTotal Est. Savings: ${formatCurrency(savingsData.minSavings)}–${formatCurrency(savingsData.maxSavings)}\n\nBook your free call: ${calendlyLink}\n\n${smsDisclaimer}`
       }
     };
 }
@@ -42,8 +54,11 @@ export const generateNotifications = async (
   
   const ai = new GoogleGenAI({ apiKey });
 
-  const firstName = formData.name.split(' ')[0] || "Hero";
+  const firstName = getFirstName(formData.name);
   const downPaymentAmount = (formData.homePrice * formData.downPaymentPercent) / 100;
+  const formattedGuaranteedSavings = formatCurrency(GUARANTEED_SAVINGS);
+  const formattedMinBonusSavings = formatCurrency(MIN_BONUS_SAVINGS);
+  const formattedMaxBonusSavings = formatCurrency(MAX_BONUS_SAVINGS);
   const prompt = `
     You are an assistant for "Downtown Financial Group". Your task is to generate a personalized email and SMS notification for a user based on their savings estimation.
 
@@ -56,8 +71,8 @@ export const generateNotifications = async (
 
     Savings Breakdown:
     - Hero Credit: ${formatCurrency(savingsData.heroCredit)}
-    - Guaranteed Partner Savings: $${GUARANTEED_SAVINGS}
-    - Potential Bonus Savings: $${MIN_BONUS_SAVINGS}–$${MAX_BONUS_SAVINGS}
+    - Guaranteed Partner Savings: ${formattedGuaranteedSavings}
+    - Potential Bonus Savings: ${formattedMinBonusSavings}–${formattedMaxBonusSavings}
     - Total Estimated Savings Range: ${formatCurrency(savingsData.minSavings)}–${formatCurrency(savingsData.maxSavings)}
 
     Required Link:
@@ -76,8 +91,8 @@ export const generateNotifications = async (
           
           Your Savings
           • Hero Credit (loan-based tier): [Hero Credit]
-          • Guaranteed Partner Savings: $${GUARANTEED_SAVINGS}
-          • Potential Bonus Savings: $${MIN_BONUS_SAVINGS}–$${MAX_BONUS_SAVINGS}
+          • Guaranteed Partner Savings: ${formattedGuaranteedSavings}
+          • Potential Bonus Savings: ${formattedMinBonusSavings}–${formattedMaxBonusSavings}
           
           Total Estimated Savings: [Total Estimated Savings Range]
           
@@ -94,7 +109,7 @@ export const generateNotifications = async (
           "Hi ${firstName}, your Hero Savings Report is ready.
 
           Home Price: [Home Price] | Down: [Down Payment Percent]% ([Down Payment Amount]) | Loan: [Estimated Loan Amount]
-          Hero Credit: [Hero Credit] | Partner: $${GUARANTEED_SAVINGS} | Bonus: $${MIN_BONUS_SAVINGS}–$${MAX_BONUS_SAVINGS}
+          Hero Credit: [Hero Credit] | Partner: ${formattedGuaranteedSavings} | Bonus: ${formattedMinBonusSavings}–${formattedMaxBonusSavings}
           Total Est. Savings: [Total Estimated Savings Range]
           
           Book your free call: ${calendlyLink}

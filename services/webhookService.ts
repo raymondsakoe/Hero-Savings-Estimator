@@ -1,4 +1,5 @@
 import type { FormData, SavingsData, GeneratedContent } from '../types';
+import { sanitizeFormData, normalizePhoneToE164 } from '../utils/sanitize';
 
 // In a real app, these would be secure environment variables.
 const HIGHLEVEL_API_KEY = import.meta.env.VITE_HIGHLEVEL_API_KEY;
@@ -11,27 +12,90 @@ interface GoHighLevelContact {
   phone?: string;
 }
 
-const sendToGoHighLevel = async (formData: FormData): Promise<GoHighLevelContact | null> => {
-  if (!HIGHLEVEL_API_KEY || !HIGHLEVEL_LOCATION_ID) {
-    console.warn('GoHighLevel credentials not configured; skipping GoHighLevel sync.');
+const findContactByEmail = async (email: string): Promise<GoHighLevelContact | null> => {
+  if (!HIGHLEVEL_API_KEY || !HIGHLEVEL_LOCATION_ID || !email) {
     return null;
   }
 
-  const nameParts = formData.name.trim().split(/\s+/);
+  const params = new URLSearchParams({
+    locationId: HIGHLEVEL_LOCATION_ID,
+    query: email,
+  });
+
+  try {
+    const response = await fetch(`https://services.leadconnectorhq.com/contacts/?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Version: '2021-07-28',
+        Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      console.warn(`GoHighLevel contact lookup failed ${response.status}: ${errorBody}`);
+      return null;
+    }
+
+    const data = await response.json().catch(() => null);
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    const contacts: unknown[] = Array.isArray((data as Record<string, unknown>).contacts)
+      ? ((data as Record<string, unknown>).contacts as unknown[])
+      : Array.isArray(data)
+        ? (data as unknown[])
+        : [];
+
+    for (const candidate of contacts) {
+      if (!candidate || typeof candidate !== 'object') {
+        continue;
+      }
+      const record =
+        (candidate as Record<string, unknown>).contact && typeof (candidate as Record<string, unknown>).contact === 'object'
+          ? ((candidate as Record<string, unknown>).contact as Record<string, unknown>)
+          : (candidate as Record<string, unknown>);
+      const rawId = record.id;
+      const rawEmail = record.email;
+      if (!rawId || !rawEmail) {
+        continue;
+      }
+      if (String(rawEmail).toLowerCase() === email.toLowerCase()) {
+        const phone = record.phone;
+        return {
+          id: String(rawId),
+          phone: phone ? String(phone) : undefined,
+        };
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error looking up GoHighLevel contact:', error);
+    return null;
+  }
+};
+
+const buildContactPayload = (sanitized: FormData) => {
+  const nameParts = sanitized.name.trim().split(/\s+/);
   const firstName = nameParts[0] || 'Lead';
   const lastName = nameParts.slice(1).join(' ');
 
-  const payload = {
+  return {
     locationId: HIGHLEVEL_LOCATION_ID,
     firstName,
     lastName,
-    name: formData.name || firstName,
-    email: formData.email,
-    phone: formData.phone,
+    name: sanitized.name || firstName,
+    email: sanitized.email,
+    phone: sanitized.phone || undefined,
     source: 'Hero Savings Estimator',
     tags: ['KFCH-Estimator'],
   };
+};
 
+const createContact = async (payload: Record<string, unknown>): Promise<GoHighLevelContact | null> => {
   try {
     const response = await fetch('https://services.leadconnectorhq.com/contacts/', {
       method: 'POST',
@@ -71,15 +135,86 @@ const sendToGoHighLevel = async (formData: FormData): Promise<GoHighLevelContact
     console.warn('GoHighLevel contact created but response lacked id.');
     return null;
   } catch (error) {
-    console.error('Error sending data to GoHighLevel:', error);
+    console.error('Error creating GoHighLevel contact:', error);
     throw error;
   }
 };
 
+const updateContact = async (contactId: string, payload: Record<string, unknown>): Promise<void> => {
+  try {
+    const response = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Version: '2021-07-28',
+        Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      console.warn(`GoHighLevel contact update failed ${response.status}: ${errorBody}`);
+    }
+  } catch (error) {
+    console.error('Error updating GoHighLevel contact:', error);
+  }
+};
+
+const ensureGoHighLevelContact = async (formData: FormData): Promise<GoHighLevelContact | null> => {
+  if (!HIGHLEVEL_API_KEY || !HIGHLEVEL_LOCATION_ID) {
+    console.warn('GoHighLevel credentials not configured; skipping GoHighLevel sync.');
+    return null;
+  }
+
+  const sanitized = sanitizeFormData(formData);
+  const payload = buildContactPayload(sanitized);
+
+  const existing = await findContactByEmail(sanitized.email);
+  if (existing) {
+    await updateContact(existing.id, payload);
+    return {
+      id: existing.id,
+      phone: existing.phone || sanitized.phone || undefined,
+    };
+  }
+
+  try {
+    const created = await createContact(payload);
+    if (created) {
+      return created;
+    }
+  } catch (error) {
+    console.error('Error creating contact, attempting lookup fallback:', error);
+  }
+
+  const fallback = await findContactByEmail(sanitized.email);
+  if (fallback) {
+    await updateContact(fallback.id, payload);
+    return {
+      id: fallback.id,
+      phone: fallback.phone || sanitized.phone || undefined,
+    };
+  }
+
+  console.warn('Unable to locate or create GoHighLevel contact for email:', sanitized.email);
+  return null;
+};
+
 const toHtml = (text: string) => {
+  const escapeHtml = (value: string) =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
   return text
     .split('\n')
-    .map((line) => line.trim().length === 0 ? '<br />' : `<p>${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
+    .map((line) => {
+      const escaped = escapeHtml(line);
+      return escaped.trim().length === 0 ? '<br />' : `<p>${escaped}</p>`;
+    })
     .join('');
 };
 
@@ -117,21 +252,10 @@ const sendMessagesForContact = async (
 
   const contactId = contact.id;
   const contactPhone = contact.phone ? contact.phone : formData.phone;
-  const formatE164 = (value: string) => {
-    const digits = value.replace(/\D+/g, '');
-    if (!digits) return '';
-    if (digits.length === 11 && digits.startsWith('1')) {
-      return `+${digits}`;
-    }
-    if (digits.length === 10) {
-      return `+1${digits}`;
-    }
-    return `+${digits}`;
-  };
+  const contactE164 = normalizePhoneToE164(contactPhone || '');
+  const inputE164 = normalizePhoneToE164(formData.phone);
 
   const messagePromises: Promise<void>[] = [];
-  const contactE164 = formatE164(contactPhone || '');
-  const inputE164 = formatE164(formData.phone);
 
   if (HIGHLEVEL_EMAIL_FROM) {
     const emailPayload = {
@@ -155,7 +279,7 @@ const sendMessagesForContact = async (
     } else if (contactE164 !== inputE164) {
       console.warn('Contact phone does not match submitted phone number; skipping SMS send.');
     } else {
-      const fromNumber = formatE164(HIGHLEVEL_SMS_FROM_NUMBER);
+      const fromNumber = normalizePhoneToE164(HIGHLEVEL_SMS_FROM_NUMBER);
 
       const smsPayload = {
         type: 'SMS',
@@ -186,8 +310,9 @@ export const sendLeadData = async (
   _savingsData: SavingsData,
   generatedContent: GeneratedContent
 ): Promise<void> => {
-  const contact = await sendToGoHighLevel(formData);
+  const sanitizedFormData = sanitizeFormData(formData);
+  const contact = await ensureGoHighLevelContact(sanitizedFormData);
   if (contact) {
-    await sendMessagesForContact(contact, formData, generatedContent);
+    await sendMessagesForContact(contact, sanitizedFormData, generatedContent);
   }
 };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { GeneratedContent, FormData, SavingsData } from '../types';
 import { GUARANTEED_SAVINGS, MIN_BONUS_SAVINGS, MAX_BONUS_SAVINGS, TESTIMONIALS } from '../constants';
+import { sanitizeFormData } from '../utils/sanitize';
 
 const ShareIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -110,6 +111,9 @@ const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({ generatedConten
     }
   };
 
+  const sanitizedFormData = sanitizeFormData(formData);
+  const greetingName = sanitizedFormData.name.split(' ')[0] || 'Hero';
+
   return (
     <div className="animate-fade-in text-center">
       <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-800 mb-3">
@@ -145,12 +149,12 @@ const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({ generatedConten
             <h3 className="text-lg font-semibold text-gray-800 mb-3">Email Preview:</h3>
             <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
                 <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-sm text-gray-500 mb-3 border-b pb-3">
-                    <span className="font-semibold">From:</span><span>Downtown Financial Group</span>
-                    <span className="font-semibold">To:</span><span>{formData.email}</span>
+                    <span className="font-semibold">From:</span><span>Keys for Community Heroes</span>
+                    <span className="font-semibold">To:</span><span>{sanitizedFormData.email}</span>
                     <span className="font-semibold">Subject:</span><span className="font-bold text-gray-800">{generatedContent.email.subject}</span>
                 </div>
                 <div className="text-gray-700 text-sm leading-relaxed space-y-4 p-2">
-                    <p>Hi {formData.name.split(' ')[0] || "Hero"},</p>
+                    <p>Hi {greetingName},</p>
                     <p>Here’s your personalized Hero Savings Report.</p>
 
                     <table className="w-full text-left">
