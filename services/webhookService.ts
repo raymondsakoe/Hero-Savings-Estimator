@@ -140,7 +140,41 @@ const createContact = async (payload: Record<string, unknown>): Promise<GoHighLe
   }
 };
 
-const updateContact = async (contactId: string, payload: Record<string, unknown>): Promise<void> => {
+const addTagToContact = async (contactId: string, tags: string[]): Promise<void> => {
+  if (!tags.length) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}/tags/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Version: '2021-07-28',
+        Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
+      },
+      body: JSON.stringify({ tags }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      console.warn(`GoHighLevel tag update failed ${response.status}: ${errorBody}`);
+    }
+  } catch (error) {
+    console.error('Error adding tag to GoHighLevel contact:', error);
+  }
+};
+
+const addAdditionalEmail = async (contactId: string, email: string): Promise<void> => {
+  if (!email) {
+    return;
+  }
+
+  const payload = {
+    additionalEmails: [{ email }],
+  };
+
   try {
     const response = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
       method: 'PUT',
@@ -155,11 +189,41 @@ const updateContact = async (contactId: string, payload: Record<string, unknown>
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
-      console.warn(`GoHighLevel contact update failed ${response.status}: ${errorBody}`);
+      console.warn(`GoHighLevel additional email update failed ${response.status}: ${errorBody}`);
     }
   } catch (error) {
-    console.error('Error updating GoHighLevel contact:', error);
+    console.error('Error adding additional email to GoHighLevel contact:', error);
   }
+};
+
+const extractDuplicateContactId = (error: unknown): string | null => {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const match = error.message.match(/\{.*\}/s);
+  const candidate = match ? match[0] : '';
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(candidate);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      parsed.meta &&
+      typeof parsed.meta === 'object' &&
+      parsed.meta.matchingField === 'phone' &&
+      parsed.meta.contactId
+    ) {
+      return String(parsed.meta.contactId);
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return null;
 };
 
 const ensureGoHighLevelContact = async (formData: FormData): Promise<GoHighLevelContact | null> => {
@@ -170,10 +234,12 @@ const ensureGoHighLevelContact = async (formData: FormData): Promise<GoHighLevel
 
   const sanitized = sanitizeFormData(formData);
   const payload = buildContactPayload(sanitized);
+  const desiredTags = Array.isArray(payload.tags) ? (payload.tags as string[]) : [];
 
   const existing = await findContactByEmail(sanitized.email);
   if (existing) {
-    await updateContact(existing.id, payload);
+    await addTagToContact(existing.id, desiredTags);
+    await addAdditionalEmail(existing.id, sanitized.email);
     return {
       id: existing.id,
       phone: existing.phone || sanitized.phone || undefined,
@@ -183,15 +249,26 @@ const ensureGoHighLevelContact = async (formData: FormData): Promise<GoHighLevel
   try {
     const created = await createContact(payload);
     if (created) {
+      await addAdditionalEmail(created.id, sanitized.email);
       return created;
     }
   } catch (error) {
+    const duplicateId = extractDuplicateContactId(error);
+    if (duplicateId) {
+      await addTagToContact(duplicateId, desiredTags);
+      await addAdditionalEmail(duplicateId, sanitized.email);
+      return {
+        id: duplicateId,
+        phone: sanitized.phone || undefined,
+      };
+    }
     console.error('Error creating contact, attempting lookup fallback:', error);
   }
 
   const fallback = await findContactByEmail(sanitized.email);
   if (fallback) {
-    await updateContact(fallback.id, payload);
+    await addTagToContact(fallback.id, desiredTags);
+    await addAdditionalEmail(fallback.id, sanitized.email);
     return {
       id: fallback.id,
       phone: fallback.phone || sanitized.phone || undefined,
