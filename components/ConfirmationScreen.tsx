@@ -113,6 +113,7 @@ const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({ generatedConten
 
   const sanitizedFormData = sanitizeFormData(formData);
   const greetingName = sanitizedFormData.name.split(' ')[0] || 'Hero';
+  const showMessagePreview = false; // toggle to true to re-enable on-screen previews
 
   return (
     <div className="animate-fade-in text-center">
@@ -143,7 +144,7 @@ const ConfirmationScreen: React.FC<ConfirmationScreenProps> = ({ generatedConten
       
       <TestimonialCarousel testimonials={TESTIMONIALS} />
 
-      {generatedContent && savingsData && (
+      {showMessagePreview && generatedContent && savingsData && (
         <div className="text-left space-y-6 bg-gray-50 p-6 rounded-lg border">
           <div>
             <h3 className="text-lg font-semibold text-gray-800 mb-3">Email Preview:</h3>
