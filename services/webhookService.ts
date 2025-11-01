@@ -10,12 +10,14 @@ const HIGHLEVEL_EMAIL_FROM = import.meta.env.VITE_HIGHLEVEL_EMAIL_FROM;
 interface GoHighLevelContact {
   id: string;
   phone?: string;
+  email?: string;
 }
 
 interface GoHighLevelContactDetails extends GoHighLevelContact {
-  email?: string;
   additionalEmails?: string[];
 }
+
+const normalizePhoneDigits = (value: string) => value.replace(/\D+/g, '');
 
 const findContactByEmail = async (email: string): Promise<GoHighLevelContactDetails | null> => {
   if (!HIGHLEVEL_API_KEY || !HIGHLEVEL_LOCATION_ID || !email) {
@@ -121,16 +123,113 @@ const findContactByEmail = async (email: string): Promise<GoHighLevelContactDeta
   }
 };
 
+const findContactByPhone = async (phone: string): Promise<GoHighLevelContactDetails | null> => {
+  if (!HIGHLEVEL_API_KEY || !HIGHLEVEL_LOCATION_ID || !phone) {
+    return null;
+  }
+
+  const normalizedTarget = normalizePhoneToE164(phone);
+  if (!normalizedTarget) {
+    return null;
+  }
+
+  const queries = Array.from(new Set([normalizePhoneDigits(normalizedTarget), normalizedTarget])).filter((value) => value);
+
+  for (const query of queries) {
+    const params = new URLSearchParams({
+      locationId: HIGHLEVEL_LOCATION_ID,
+      query,
+    });
+
+    try {
+      const response = await fetch(`https://services.leadconnectorhq.com/contacts/?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Version: '2021-07-28',
+          Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        console.warn(`GoHighLevel contact phone lookup failed ${response.status}: ${errorBody}`);
+        continue;
+      }
+
+      const data = await response.json().catch(() => null);
+      if (!data || typeof data !== 'object') {
+        continue;
+      }
+
+      const contacts: unknown[] = Array.isArray((data as Record<string, unknown>).contacts)
+        ? ((data as Record<string, unknown>).contacts as unknown[])
+        : Array.isArray(data)
+          ? (data as unknown[])
+          : [];
+
+      for (const candidate of contacts) {
+        if (!candidate || typeof candidate !== 'object') {
+          continue;
+        }
+        const record =
+          (candidate as Record<string, unknown>).contact && typeof (candidate as Record<string, unknown>).contact === 'object'
+            ? ((candidate as Record<string, unknown>).contact as Record<string, unknown>)
+            : (candidate as Record<string, unknown>);
+
+        const rawId = record.id;
+        const rawPhone = record.phone;
+        if (!rawId || !rawPhone) {
+          continue;
+        }
+        const normalizedPhone = normalizePhoneToE164(String(rawPhone));
+        if (!normalizedPhone || normalizedPhone !== normalizedTarget) {
+          continue;
+        }
+
+        const rawEmail = record.email;
+        const additionalEmailsRaw = Array.isArray(record.additionalEmails) ? (record.additionalEmails as unknown[]) : [];
+        const additionalEmails =
+          additionalEmailsRaw
+            .map((entry) => {
+              if (typeof entry === 'string') {
+                return entry.trim();
+              }
+              if (!entry || typeof entry !== 'object') {
+                return null;
+              }
+              const entryEmail = (entry as Record<string, unknown>).email;
+              return typeof entryEmail === 'string' ? entryEmail.trim() : null;
+            })
+            .filter((value): value is string => Boolean(value)) || [];
+
+        return {
+          id: String(rawId),
+          phone: normalizedPhone,
+          email: typeof rawEmail === 'string' ? rawEmail.trim() : undefined,
+          additionalEmails,
+        };
+      }
+    } catch (error) {
+      console.error('Error looking up GoHighLevel contact by phone:', error);
+    }
+  }
+
+  return null;
+};
+
 const buildContactPayload = (sanitized: FormData) => {
-  const nameParts = sanitized.name.trim().split(/\s+/);
-  const firstName = nameParts[0] || 'Lead';
-  const lastName = nameParts.slice(1).join(' ');
+  const normalizedName = sanitized.name.trim().length ? sanitized.name.trim() : 'Lead Hero';
+  const nameParts = normalizedName.split(/\s+/);
+  const firstName = nameParts.shift() || 'Lead';
+  const lastName = nameParts.length ? nameParts.join(' ') : 'Hero';
+  const composedName = `${firstName} ${lastName}`.trim();
 
   return {
     locationId: HIGHLEVEL_LOCATION_ID,
     firstName,
     lastName,
-    name: sanitized.name || firstName,
+    name: composedName,
     email: sanitized.email,
     phone: sanitized.phone || undefined,
     source: 'Hero Savings Estimator',
@@ -226,15 +325,17 @@ const createContact = async (payload: Record<string, unknown>): Promise<GoHighLe
         const contact = data.contact as Record<string, unknown>;
         const id = contact.id ? String(contact.id) : null;
         const phone = contact.phone ? String(contact.phone) : undefined;
+        const email = contact.email ? String(contact.email) : undefined;
         if (id) {
-          return { id, phone };
+          return { id, phone, email };
         }
       }
       if ('id' in data) {
         const id = data.id ? String(data.id) : null;
         if (id) {
           const phone = 'phone' in data && data.phone ? String((data as Record<string, unknown>).phone) : undefined;
-          return { id, phone };
+          const email = 'email' in data && data.email ? String((data as Record<string, unknown>).email) : undefined;
+          return { id, phone, email };
         }
       }
     }
@@ -277,19 +378,23 @@ const addTagToContact = async (contactId: string, tags: string[]): Promise<void>
   }
 };
 
-const ensurePrimaryEmail = async (contactId: string, email: string): Promise<void> => {
-  if (!email) {
-    return;
-  }
-
+const ensureContactDetails = async (
+  contactId: string,
+  sanitized: FormData
+): Promise<GoHighLevelContactDetails | null> => {
   const details = await fetchContactById(contactId);
   if (!details) {
-    return;
+    return null;
   }
 
-  const existingPrimary = details.email ? details.email.trim() : '';
-  if (existingPrimary) {
-    return;
+  const updates: Record<string, string> = {};
+
+  if (sanitized.email && (!details.email || !details.email.trim())) {
+    updates.email = sanitized.email;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return details;
   }
 
   try {
@@ -301,26 +406,48 @@ const ensurePrimaryEmail = async (contactId: string, email: string): Promise<voi
         Version: '2021-07-28',
         Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
       },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify(updates),
     });
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
-      console.warn(`GoHighLevel primary email update failed ${response.status}: ${errorBody}`);
+      console.warn(`GoHighLevel contact details update failed ${response.status}: ${errorBody}`);
+      return details;
     }
+
+    return {
+      ...details,
+      ...updates,
+    };
   } catch (error) {
-    console.error('Error updating GoHighLevel primary email:', error);
+    console.error('Error updating GoHighLevel contact details:', error);
+    return details;
   }
 };
 
-const addAdditionalEmail = async (contactId: string, email: string): Promise<void> => {
+const addAdditionalEmail = async (
+  contactId: string,
+  email: string,
+  details?: GoHighLevelContactDetails | null
+): Promise<void> => {
   if (!email) {
     return;
   }
 
-  const existing = await findContactByEmail(email);
-  if (existing && existing.id === contactId) {
+  const lowerTarget = email.toLowerCase();
+  const hasEmailAlready =
+    (details?.email && details.email.toLowerCase() === lowerTarget) ||
+    (details?.additionalEmails || []).some((entry) => entry.toLowerCase() === lowerTarget);
+
+  if (hasEmailAlready) {
     return;
+  }
+
+  if (!details) {
+    const existing = await findContactByEmail(email);
+    if (existing && existing.id === contactId) {
+      return;
+    }
   }
 
   const payload = {
@@ -347,6 +474,37 @@ const addAdditionalEmail = async (contactId: string, email: string): Promise<voi
     console.error('Error adding additional email to GoHighLevel contact:', error);
   }
 };
+
+const ensurePrimaryEmailForMessaging = async (contactId: string, email: string): Promise<boolean> => {
+  if (!email) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Version: '2021-07-28',
+        Authorization: `Bearer ${HIGHLEVEL_API_KEY}`,
+      },
+      body: JSON.stringify({ email }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      console.warn(`GoHighLevel primary email ensure failed ${response.status}: ${errorBody}`);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error ensuring GoHighLevel primary email for messaging:', error);
+    return false;
+  }
+};
+
 
 const extractDuplicateContactId = (error: unknown): string | null => {
   if (!(error instanceof Error)) {
@@ -391,17 +549,35 @@ const ensureGoHighLevelContact = async (formData: FormData): Promise<GoHighLevel
   }
 
   const sanitized = sanitizeFormData(formData);
+  if (!sanitized.email && !sanitized.phone) {
+    console.warn('GoHighLevel sync skipped due to missing contact details.');
+    return null;
+  }
+  sanitized.name = sanitized.name.trim().length ? sanitized.name : 'Lead Hero';
   const payload = buildContactPayload(sanitized);
   const desiredTags = Array.isArray(payload.tags) ? (payload.tags as string[]) : [];
 
-  const existing = await findContactByEmail(sanitized.email);
+  const phoneMatch = sanitized.phone ? await findContactByPhone(sanitized.phone) : null;
+  if (phoneMatch) {
+    await addTagToContact(phoneMatch.id, desiredTags);
+    const updatedDetails = await ensureContactDetails(phoneMatch.id, sanitized);
+    await addAdditionalEmail(phoneMatch.id, sanitized.email, updatedDetails);
+    return {
+      id: phoneMatch.id,
+      phone: sanitized.phone || updatedDetails?.phone || phoneMatch.phone || undefined,
+      email: updatedDetails?.email || phoneMatch.email || undefined,
+    };
+  }
+
+  const existing = sanitized.email ? await findContactByEmail(sanitized.email) : null;
   if (existing) {
     await addTagToContact(existing.id, desiredTags);
-    await ensurePrimaryEmail(existing.id, sanitized.email);
-    await addAdditionalEmail(existing.id, sanitized.email);
+    const updatedDetails = await ensureContactDetails(existing.id, sanitized);
+    await addAdditionalEmail(existing.id, sanitized.email, updatedDetails);
     return {
       id: existing.id,
-      phone: existing.phone || sanitized.phone || undefined,
+      phone: sanitized.phone || updatedDetails?.phone || existing.phone || undefined,
+      email: updatedDetails?.email || existing.email || undefined,
     };
   }
 
@@ -409,30 +585,36 @@ const ensureGoHighLevelContact = async (formData: FormData): Promise<GoHighLevel
     const created = await createContact(payload);
     if (created) {
       await addAdditionalEmail(created.id, sanitized.email);
-      return created;
+      return {
+        id: created.id,
+        phone: sanitized.phone || created.phone || undefined,
+        email: created.email || sanitized.email || undefined,
+      };
     }
   } catch (error) {
     const duplicateId = extractDuplicateContactId(error);
     if (duplicateId) {
       await addTagToContact(duplicateId, desiredTags);
-      await ensurePrimaryEmail(duplicateId, sanitized.email);
-      await addAdditionalEmail(duplicateId, sanitized.email);
+      const updatedDetails = await ensureContactDetails(duplicateId, sanitized);
+      await addAdditionalEmail(duplicateId, sanitized.email, updatedDetails);
       return {
         id: duplicateId,
-        phone: sanitized.phone || undefined,
+        phone: sanitized.phone || updatedDetails?.phone || undefined,
+        email: updatedDetails?.email || undefined,
       };
     }
     console.error('Error creating contact, attempting lookup fallback:', error);
   }
 
-  const fallback = await findContactByEmail(sanitized.email);
+  const fallback = sanitized.email ? await findContactByEmail(sanitized.email) : null;
   if (fallback) {
     await addTagToContact(fallback.id, desiredTags);
-    await ensurePrimaryEmail(fallback.id, sanitized.email);
-    await addAdditionalEmail(fallback.id, sanitized.email);
+    const updatedDetails = await ensureContactDetails(fallback.id, sanitized);
+    await addAdditionalEmail(fallback.id, sanitized.email, updatedDetails);
     return {
       id: fallback.id,
-      phone: fallback.phone || sanitized.phone || undefined,
+      phone: sanitized.phone || updatedDetails?.phone || fallback.phone || undefined,
+      email: updatedDetails?.email || fallback.email || undefined,
     };
   }
 
@@ -489,33 +671,44 @@ const sendMessagesForContact = async (
   }
 
   const contactId = contact.id;
-  const contactPhone = contact.phone ? contact.phone : formData.phone;
-  const contactE164 = normalizePhoneToE164(contactPhone || '');
-  const inputE164 = normalizePhoneToE164(formData.phone);
+  const submittedE164 = normalizePhoneToE164(formData.phone);
+  const storedE164 = normalizePhoneToE164(contact.phone || '');
+  const destinationE164 = submittedE164 || storedE164;
 
   const messagePromises: Promise<void>[] = [];
 
   if (HIGHLEVEL_EMAIL_FROM) {
-    const emailPayload = {
-      type: 'Email',
-      contactId,
-      subject: generatedContent.email.subject,
-      message: generatedContent.email.body,
-      html: toHtml(generatedContent.email.body),
-      emailFrom: HIGHLEVEL_EMAIL_FROM,
-      emailTo: formData.email,
-      status: 'pending',
-    };
-    messagePromises.push(sendConversationMessage(emailPayload));
+    const targetEmail = (contact.email || formData.email || '').trim();
+    if (!targetEmail) {
+      console.warn('Contact email missing; skipping email send.');
+    } else {
+      let canSend = true;
+      if (!contact.email || contact.email.trim().toLowerCase() !== targetEmail.toLowerCase()) {
+        canSend = await ensurePrimaryEmailForMessaging(contactId, targetEmail);
+      }
+      if (!canSend) {
+        console.warn('Unable to ensure contact email; skipping email send.');
+      } else {
+        const emailPayload = {
+          type: 'Email',
+          contactId,
+          subject: generatedContent.email.subject,
+          message: generatedContent.email.body,
+          html: toHtml(generatedContent.email.body),
+          emailFrom: HIGHLEVEL_EMAIL_FROM,
+          emailTo: targetEmail,
+          status: 'pending',
+        };
+        messagePromises.push(sendConversationMessage(emailPayload));
+      }
+    }
   }
 
   if (formData.wantsText && HIGHLEVEL_SMS_FROM_NUMBER) {
-    if (!contactE164) {
-      console.warn('Contact phone missing; skipping SMS send.');
-    } else if (!inputE164) {
+    if (!destinationE164) {
+      console.warn('No valid phone number available; skipping SMS send.');
+    } else if (!submittedE164) {
       console.warn('Submitted phone number invalid; skipping SMS send.');
-    } else if (contactE164 !== inputE164) {
-      console.warn('Contact phone does not match submitted phone number; skipping SMS send.');
     } else {
       const fromNumber = normalizePhoneToE164(HIGHLEVEL_SMS_FROM_NUMBER);
 
@@ -524,7 +717,7 @@ const sendMessagesForContact = async (
         contactId,
         message: generatedContent.sms.body,
         fromNumber,
-        toNumber: contactE164,
+        toNumber: destinationE164,
         status: 'pending',
       };
       messagePromises.push(sendConversationMessage(smsPayload));
@@ -553,4 +746,9 @@ export const sendLeadData = async (
   if (contact) {
     await sendMessagesForContact(contact, sanitizedFormData, generatedContent);
   }
+};
+
+export const testHelpers = {
+  ensureGoHighLevelContact,
+  sendMessagesForContact,
 };
